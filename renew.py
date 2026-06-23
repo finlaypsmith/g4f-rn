@@ -5,8 +5,7 @@ from seleniumbase import SB
 # 💡 G4F.GG 续期
 # ==========================================
 TARGETS = [
-    {"name": "renqi", "url": "https://g4f.gg/renqi"},
-    {"name": "heisi", "url": "https://g4f.gg/heisi"}
+    {"name": "appa", "url": "https://g4f.gg/appa"}
 ]
 
 TG_TOKEN = os.getenv("TG_TOKEN", "")
