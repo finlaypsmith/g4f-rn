@@ -91,8 +91,8 @@ for target in TARGETS:
             print("点击完成，等待验证结果...")
             time.sleep(8)
             
-            print("等待 16 秒广告时间，确保最终页面完全加载...")
-            time.sleep(16)
+            print("等待广告时间，确保最终页面完全加载")
+            time.sleep(30)
             
             print("获取页面剩余时间...")
             page_text = sb.get_text("body")
