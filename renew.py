@@ -2,7 +2,7 @@ import os, sys, time, urllib.request, json, re
 from seleniumbase import SB
 
 # ==========================================
-# 💡 G4F.GG 自动续期
+# 💡 G4F.GG 续期脚本
 # ==========================================
 TARGETS = [
     {"name": "appa", "url": "https://g4f.gg/appa"},
@@ -15,7 +15,6 @@ TG_CHAT = os.getenv("TG_CHAT_ID", "")
 def send_unified_tg(results):
     if TG_TOKEN and TG_CHAT:
         try:
-            # 构建统一的消息面板
             lines = ["🤖 G4F 续期综合汇报"]
             for res in results:
                 lines.append("-----------------------")
@@ -47,7 +46,6 @@ for target in TARGETS:
     print(f"\n开始处理节点: [{name}]")
     
     try:
-        # 确保每次循环都开启一个全新的、未被拦截的纯净浏览器进程
         with SB(uc=True, proxy=proxy_str, headless=False, window_size="1920,1080") as sb:
             print(f"正在访问目标网址: {url}")
             sb.driver.set_window_position(0, 0)
@@ -57,7 +55,7 @@ for target in TARGETS:
             os.makedirs("screenshots", exist_ok=True)
             sb.save_screenshot(f"screenshots/{name}_1_page_loaded.png")
 
-            print("尝试点击续期按钮...")
+            print("尝试点击初始续期按钮...")
             js_click_code = """
             let els = document.querySelectorAll('button, a, input, div, span');
             for (let i = els.length - 1; i >= 0; i--) {
@@ -88,11 +86,31 @@ for target in TARGETS:
                     os.system(f"xdotool mousemove {x} {y} click 1")
                     time.sleep(0.1)
             
-            print("点击完成，等待验证结果...")
+            print("点击完成，等待验证盾亮起绿勾...")
             time.sleep(8)
             
-            print("等待广告时间，确保最终页面完全加载")
-            time.sleep(30)
+            print("尝试点击最后的 [VOTE - ADDS 90 MINUTES] 确认按钮...")
+            js_vote_click = """
+            let els = document.querySelectorAll('button, a, input, div, span');
+            for (let i = els.length - 1; i >= 0; i--) {
+                let el = els[i];
+                let text = (el.innerText || '').toUpperCase();
+                if (text.includes('VOTE') || text.includes('SUCCESS')) {
+                    el.click();
+                    break;
+                }
+            }
+            """
+            sb.execute_script(js_vote_click)
+            
+            #  XPath 强点
+            try:
+                sb.click('xpath=//*[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "vote")]', timeout=2)
+            except:
+                pass
+            
+            print("等待 16 秒广告或最终加载时间...")
+            time.sleep(16)
             
             print("获取页面剩余时间...")
             page_text = sb.get_text("body")
@@ -101,7 +119,8 @@ for target in TARGETS:
             print(f"提取到时间: {remaining_time}")
                 
             page_text_lower = page_text.lower()
-            if "90 minutes added" in page_text_lower or "extended this server recently" in page_text_lower:
+            # 兼容多种成功提示词
+            if "90 minutes added" in page_text_lower or "extended this server recently" in page_text_lower or "success" in page_text_lower:
                 status = "✅ 续期成功"
             else:
                 status = "⚠️ 状态未知"
@@ -111,7 +130,6 @@ for target in TARGETS:
             except:
                 pass
             
-            # 记录当前节点的成功状态
             task_results.append({"name": name, "status": status, "time": remaining_time})
 
     except Exception as e:
