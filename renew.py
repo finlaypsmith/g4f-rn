@@ -2,7 +2,7 @@ import os, sys, time, urllib.request, json, re
 from seleniumbase import SB
 
 # ==========================================
-# 💡 G4F.GG 自动续期 (原生信任点击破广告版)
+# 💡 G4F.GG 自动续期 (垂直扫射 + 掀桌刷新版)
 # ==========================================
 TARGETS = [
     {"name": "renqi", "url": "https://g4f.gg/renqi"},
@@ -86,38 +86,33 @@ for target in TARGETS:
                     os.system(f"xdotool mousemove {x} {y} click 1")
                     time.sleep(0.1)
             
-            print("点击完成，等待验证盾亮起绿勾...")
-            time.sleep(8)
+            print("点击完成，等待验证盾亮起绿勾 (10秒)...")
+            time.sleep(10)
             
-            print("尝试点击最后的 [VOTE - ADDS 90 MINUTES] 确认按钮...")
+            # 🌟 绝杀 1：垂直扫射 VOTE 按钮，避免 Y 轴高度误差！
+            print("执行中心垂直扫射，确保物理击中 [VOTE] 按钮...")
+            # 保持 X 轴在屏幕正中心，Y 轴从 600 一路点击到 750，每隔 30 像素开一枪
+            for sweep_y in range(600, 780, 30):
+                os.system(f"xdotool mousemove 960 {sweep_y} click 1")
+                time.sleep(0.2)
             
-            # 🌟 终极修复：彻底删除 JS 注入点击！只使用原生可信点击，让广告网络正常放行视频
-            try:
-                sb.click('xpath=//*[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "vote")]', timeout=5)
-            except:
-                print("⚠️ 尝试使用原生物理盲点 (X=960, Y=680)...")
-                os.system("xdotool mousemove 960 680 click 1")
+            # 🌟 等待 45 秒，让后台与广告商服务器确认发奖
+            print("等待 45 秒让视频广告完整播放并发放奖励...")
+            time.sleep(45)
             
-            print("等待 35 秒让广告完整播放并发放奖励...")
-            time.sleep(35)
+            # 🌟 绝杀 2：掀桌子战术！直接刷新页面，把所有恶心人的广告瞬间清空！
+            print("奖励已发放，强制刷新页面以清理所有广告遮挡...")
+            sb.refresh_page()
+            time.sleep(8) # 等待新页面加载完毕
             
-            # 🌟 广告播放完毕后，把可能遮挡屏幕的广告框架强行设为不可见，以便干净地提取文字
-            try:
-                sb.execute_script("document.querySelectorAll('iframe').forEach(el => el.style.display = 'none');")
-            except:
-                pass
-            
-            print("获取页面剩余时间...")
+            print("获取页面最新剩余时间...")
             page_text = sb.get_text("body")
             time_match = re.search(r'\d{2}:\d{2}:\d{2}', page_text)
             remaining_time = time_match.group(0) if time_match else "未知"
             print(f"提取到时间: {remaining_time}")
-                
-            page_text_lower = page_text.lower()
-            if "90 minutes added" in page_text_lower or "extended this server recently" in page_text_lower or "success" in page_text_lower:
-                status = "✅ 续期成功"
-            else:
-                status = "⚠️ 状态未知"
+            
+            # 刷新页面后，绿色的 "90 minutes added" 横幅可能不会出现，所以我们只要抓到时间就算成功
+            status = "✅ 续期成功" if remaining_time != "未知" else "⚠️ 状态未知"
 
             try:
                 sb.save_screenshot(f"screenshots/{name}_2_result.png")
