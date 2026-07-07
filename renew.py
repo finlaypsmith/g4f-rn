@@ -2,7 +2,7 @@ import os, sys, time, urllib.request, json, re
 from seleniumbase import SB
 
 # ==========================================
-# 💡 G4F.GG 自动续期 (垂直扫射 + 掀桌刷新版)
+# 💡 G4F.GG 自动续期
 # ==========================================
 TARGETS = [
     {"name": "renqi", "url": "https://g4f.gg/renqi"},
@@ -55,7 +55,7 @@ for target in TARGETS:
             os.makedirs("screenshots", exist_ok=True)
             sb.save_screenshot(f"screenshots/{name}_1_page_loaded.png")
 
-            print("尝试点击初始续期按钮...")
+            print("点击初始续期按钮...")
             js_click_code = """
             let step1_els = document.querySelectorAll('button, a, input, div, span');
             for (let i = step1_els.length - 1; i >= 0; i--) {
@@ -89,19 +89,15 @@ for target in TARGETS:
             print("点击完成，等待验证盾亮起绿勾 (10秒)...")
             time.sleep(10)
             
-            # 🌟 绝杀 1：垂直扫射 VOTE 按钮，避免 Y 轴高度误差！
             print("执行中心垂直扫射，确保物理击中 [VOTE] 按钮...")
-            # 保持 X 轴在屏幕正中心，Y 轴从 600 一路点击到 750，每隔 30 像素开一枪
             for sweep_y in range(600, 780, 30):
                 os.system(f"xdotool mousemove 960 {sweep_y} click 1")
                 time.sleep(0.2)
             
-            # 🌟 等待 45 秒，让后台与广告商服务器确认发奖
-            print("等待 45 秒让视频广告完整播放并发放奖励...")
+            print("等待 45 秒")
             time.sleep(45)
             
-            # 🌟 绝杀 2：掀桌子战术！直接刷新页面，把所有恶心人的广告瞬间清空！
-            print("奖励已发放，强制刷新页面以清理所有广告遮挡...")
+            print("奖励已发放，强制刷新页面")
             sb.refresh_page()
             time.sleep(8) # 等待新页面加载完毕
             
@@ -111,7 +107,6 @@ for target in TARGETS:
             remaining_time = time_match.group(0) if time_match else "未知"
             print(f"提取到时间: {remaining_time}")
             
-            # 刷新页面后，绿色的 "90 minutes added" 横幅可能不会出现，所以我们只要抓到时间就算成功
             status = "✅ 续期成功" if remaining_time != "未知" else "⚠️ 状态未知"
 
             try:
