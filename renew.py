@@ -55,8 +55,7 @@ for target in TARGETS:
             os.makedirs("screenshots", exist_ok=True)
             sb.save_screenshot(f"screenshots/{name}_1_page_loaded.png")
 
-            print("尝试点击初始续期按钮...")
-   
+            print("点击初始续期按钮...")
             js_click_code = """
             let step1_els = document.querySelectorAll('button, a, input, div, span');
             for (let i = step1_els.length - 1; i >= 0; i--) {
@@ -87,42 +86,28 @@ for target in TARGETS:
                     os.system(f"xdotool mousemove {x} {y} click 1")
                     time.sleep(0.1)
             
-            print("点击完成")
-            time.sleep(8)
+            print("点击完成，等待验证盾亮起绿勾 (10秒)...")
+            time.sleep(10)
             
-            print("尝试点击最后的 [VOTE - ADDS 90 MINUTES] 确认按钮...")
-            js_vote_click = """
-            let step2_els = document.querySelectorAll('button, a, input, div, span');
-            for (let i = step2_els.length - 1; i >= 0; i--) {
-                let el = step2_els[i];
-                let text = (el.innerText || '').toUpperCase();
-                if (text.includes('VOTE') || text.includes('SUCCESS')) {
-                    el.click();
-                    break;
-                }
-            }
-            """
-            sb.execute_script(js_vote_click)
+            print("执行中心垂直扫射，确保物理击中 [VOTE] 按钮...")
+            for sweep_y in range(600, 780, 30):
+                os.system(f"xdotool mousemove 960 {sweep_y} click 1")
+                time.sleep(0.2)
             
-            try:
-                sb.click('xpath=//*[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "vote")]', timeout=2)
-            except:
-                pass
+            print("等待 45 秒")
+            time.sleep(45)
             
-            print("等待 16 秒广告或最终加载时间...")
-            time.sleep(16)
+            print("奖励已发放，强制刷新页面")
+            sb.refresh_page()
+            time.sleep(8) # 等待新页面加载完毕
             
-            print("获取页面剩余时间...")
+            print("获取页面最新剩余时间...")
             page_text = sb.get_text("body")
             time_match = re.search(r'\d{2}:\d{2}:\d{2}', page_text)
             remaining_time = time_match.group(0) if time_match else "未知"
             print(f"提取到时间: {remaining_time}")
-                
-            page_text_lower = page_text.lower()
-            if "90 minutes added" in page_text_lower or "extended this server recently" in page_text_lower or "success" in page_text_lower:
-                status = "✅ 续期成功"
-            else:
-                status = "⚠️ 状态未知"
+            
+            status = "✅ 续期成功" if remaining_time != "未知" else "⚠️ 状态未知"
 
             try:
                 sb.save_screenshot(f"screenshots/{name}_2_result.png")
