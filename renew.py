@@ -109,8 +109,8 @@ for target in TARGETS:
             except:
                 pass
             
-            print("等待 16 秒广告或最终加载时间...")
-            time.sleep(16)
+            print("等待 25 秒广告或最终加载时间...")
+            time.sleep(25)
             
             print("获取页面剩余时间...")
             page_text = sb.get_text("body")
