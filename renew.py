@@ -2,7 +2,7 @@ import os, sys, time, urllib.request, json, re
 from seleniumbase import SB
 
 # ==========================================
-# 💡 G4F.GG 自动续期
+# 💡 G4F.GG 自动续期 (原生信任点击破广告版)
 # ==========================================
 TARGETS = [
     {"name": "renqi", "url": "https://g4f.gg/renqi"},
@@ -90,48 +90,22 @@ for target in TARGETS:
             time.sleep(8)
             
             print("尝试点击最后的 [VOTE - ADDS 90 MINUTES] 确认按钮...")
-            js_vote_click = """
-            let step2_els = document.querySelectorAll('button, a, input, div, span');
-            for (let i = step2_els.length - 1; i >= 0; i--) {
-                let el = step2_els[i];
-                let text = (el.innerText || '').toUpperCase();
-                if (text.includes('VOTE')) {
-                    el.click();
-                    break;
-                }
-            }
-            """
-            sb.execute_script(js_vote_click)
             
+            # 🌟 终极修复：彻底删除 JS 注入点击！只使用原生可信点击，让广告网络正常放行视频
             try:
-                sb.click('xpath=//*[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "vote")]', timeout=2)
+                sb.click('xpath=//*[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "vote")]', timeout=5)
+            except:
+                print("⚠️ 尝试使用原生物理盲点 (X=960, Y=680)...")
+                os.system("xdotool mousemove 960 680 click 1")
+            
+            print("等待 35 秒让广告完整播放并发放奖励...")
+            time.sleep(35)
+            
+            # 🌟 广告播放完毕后，把可能遮挡屏幕的广告框架强行设为不可见，以便干净地提取文字
+            try:
+                sb.execute_script("document.querySelectorAll('iframe').forEach(el => el.style.display = 'none');")
             except:
                 pass
-            
-            print("等待 22 秒让广告播放完毕并发放奖励...")
-            time.sleep(22)
-            
-            print
-            js_clear_ads = """
-            try {
-                let closeBtns = document.querySelectorAll('div, span, button, a');
-                for (let i = 0; i < closeBtns.length; i++) {
-                    let txt = (closeBtns[i].innerText || '').trim().toUpperCase();
-                    if (txt === 'X' || txt === 'CLOSE' || txt === 'SKIP') {
-                        closeBtns[i].click();
-                    }
-                }
-                document.querySelectorAll('iframe').forEach(el => el.style.display = 'none');
-                document.querySelectorAll('*').forEach(el => {
-                    let style = window.getComputedStyle(el);
-                    if (style.zIndex !== 'auto' && parseInt(style.zIndex) > 1000) {
-                        el.style.display = 'none';
-                    }
-                });
-            } catch(e) {}
-            """
-            sb.execute_script(js_clear_ads)
-            time.sleep(2) 
             
             print("获取页面剩余时间...")
             page_text = sb.get_text("body")
