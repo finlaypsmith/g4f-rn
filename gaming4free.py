@@ -5,7 +5,6 @@ import re
 import random
 import requests
 
-# 智能环境配置
 if "DISPLAY" not in os.environ:
     os.environ["DISPLAY"] = ":1"
     
