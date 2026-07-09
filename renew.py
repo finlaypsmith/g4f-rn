@@ -41,9 +41,10 @@ class Game4FreeRenewal:
 
     def move_mouse_human(self, sb):
         try:
-            for _ in range(3):
-                sb.slow_click("body", force=True)
-                time.sleep(random.uniform(0.5, 1.2))
+            # 🌟 修复崩溃元凶：彻底移除对 body 的盲目随机点击，防止误触隐藏的全局广告导致浏览器跳转断连
+            # 仅仅稍微执行一下像素级滚动，假装有人在操作
+            sb.execute_script("window.scrollBy(0, 10); window.scrollBy(0, -10);")
+            time.sleep(random.uniform(0.5, 1.2))
         except:
             pass
 
@@ -103,11 +104,21 @@ class Game4FreeRenewal:
             proxy=PROXY_URL
         ) as sb:
             try:
+                self.log("✅ 浏览器已启动！")
+                self.log("🌍 正在检测出口 IP...")
+                try:
+                    sb.open("https://api.ipify.org?format=json")
+                    ip_val = json.loads(re.search(r'\{.*\}', sb.get_text("body")).group(0)).get('ip', 'Unknown')
+                    parts = ip_val.split('.')
+                    self.log(f"✅ 当前出口 IP: {parts[0]}.{parts[1]}.***.{parts[-1]}")
+                except:
+                    self.log("⚠️ IP 检测跳过...")
+
                 self.log(f"📂 正在访问目标网址...")
                 sb.uc_open_with_reconnect(URL_APP_PANEL, reconnect_time=5)
                 self.human_wait(6, 10)
 
-                # 关闭 Cookie
+                # 关闭 Cookie 弹窗干扰
                 cookie_btns = [
                     '//button[contains(., "Continue with Recommended Cookies")]',
                     '//button[contains(., "Recommended Cookies")]',
@@ -124,13 +135,11 @@ class Game4FreeRenewal:
                             break
                         except:
                             pass
-                self.human_wait(3, 5)
 
                 timestamp_before = self.get_remaining_time(sb)
                 self.log(f"🕒 初始时间: {timestamp_before}")
 
-                # ================== 核心动作 1：向下滚动并点击 ==================
-                sb.execute_script("window.scrollBy(0,1000);")
+                sb.execute_script("window.scrollTo(0, document.body.scrollHeight / 3);")
                 
                 try:
                     self.log("🖱️ 正在点击初始按钮...")
@@ -144,22 +153,44 @@ class Game4FreeRenewal:
                     self.task_results.append({"name": region, "status": "❌ 失败 (初始按钮)", "time": "未知"})
                     return
 
-                # ================== 核心动作 2：验证 Cloudflare ==================
-                self.log("⏳ 开始迎战 Cloudflare...")
-                cf_indicators = ["verify you are human", "确认您是真人", "troubleshoot", "just a moment"]
-                for _ in range(10):
-                    sb.uc_gui_click_captcha()
-                    time.sleep(3)
-                    page_lower = sb.get_page_source().lower()
-                    if any(x in page_lower for x in cf_indicators):
-                        sb.uc_gui_handle_captcha()
+                # ================== 深度穿透破盾 ==================
+                self.log("⏳ 开始迎战 Cloudflare (深度穿透模式)...")
+                cf_passed = False
+                for _ in range(12): 
+                    try:
+                        sb.switch_to_default_content()
+                        
+                        if sb.is_element_present('iframe[src*="cloudflare"]'):
+                            try: sb.click('iframe[src*="cloudflare"]', timeout=1)
+                            except: pass
+                            
+                        try: sb.uc_gui_click_captcha()
+                        except: pass
+                        
+                        sb.switch_to_frame('iframe[src*="cloudflare"]')
+                        frame_text = sb.get_text("body")
+                        
+                        if "Success" in frame_text or "成功" in frame_text:
+                            self.log("✅ 侦测到 Success! CF 验证盾已亮绿灯！")
+                            cf_passed = True
+                            sb.switch_to_default_content()
+                            break
+                            
+                        if "Verify you are human" in frame_text or "真人" in frame_text:
+                            try: sb.click('label', timeout=1) 
+                            except: 
+                                try: sb.click('body', timeout=1) 
+                                except: pass
+                                
+                        sb.switch_to_default_content()
                         time.sleep(3)
-                        page_lower = sb.get_page_source().lower()
-                    if not any(x in page_lower for x in cf_indicators):
-                        self.log("✅ Cloudflare 验证通过")
-                        break
+                    except Exception as e:
+                        sb.switch_to_default_content()
+                        time.sleep(3)
+                        
+                if not cf_passed:
+                    self.log("⚠️ 未能侦测到明确的绿灯信号，尝试强行继续...")
 
-                # ================== 核心动作 3：最终确认点击 ==================
                 try:
                     self.log("🖱️ 正在触发最终确认按钮...")
                     self.move_mouse_human(sb)
@@ -172,18 +203,24 @@ class Game4FreeRenewal:
                     self.task_results.append({"name": region, "status": "❌ 失败 (确认按钮)", "time": "未知"})
                     return
 
-                # 等待奖励并刷新
-                self.log("⏳ 等待 45 秒奖励发放...")
-                time.sleep(45)
+                # 🌟 修复：增加 10 秒静默等待时间
+                self.log("⏳ 按钮已按下！静默等待 60 秒让视频广告发奖...")
+                time.sleep(60)
+                
+                self.log("🔄 奖励应已到账，刷新页面以获取最新服务器状态...")
                 sb.refresh_page()
                 time.sleep(10)
 
                 timestamp_after = self.get_remaining_time(sb)
-                self.log(f"🕒 更新时间: {timestamp_after}")
+                self.log(f"🕒 最终更新时间: {timestamp_after}")
                 
                 sb.save_screenshot(f"{self.screenshot_dir}/{region}_final_result.png")
-
-                status = "✅ 成功" if timestamp_after != "未知" and timestamp_after != timestamp_before else "⚠️ 未知/未增加"
+                
+                if timestamp_after != "未知" and timestamp_after != timestamp_before:
+                    status = "✅ 成功"
+                else:
+                    status = "⚠️ 失败/未增加"
+                    
                 self.task_results.append({"name": region, "status": status, "time": timestamp_after})
 
             except Exception as e:
