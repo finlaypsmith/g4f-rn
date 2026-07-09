@@ -130,7 +130,7 @@ class Game4FreeRenewal:
                 self.log(f"🕒 初始时间: {timestamp_before}")
 
                 # ================== 核心动作 1：向下滚动并点击 ==================
-                sb.execute_script("window.scrollBy(0,1000);")
+               sb.execute_script("window.scrollTo(0, document.body.scrollHeight / 3);")
                 
                 try:
                     self.log("🖱️ 正在点击初始按钮...")
