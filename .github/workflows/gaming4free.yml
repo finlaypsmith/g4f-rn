@@ -29,23 +29,32 @@ jobs:
       run: |
         seleniumbase install chromedriver
 
-    - name: Setup Proxy Tunnel (Gost)
+    - name: Setup Proxy Tunnel (Xray-core)
       env:
-        PROXY_URL: ${{ secrets.PROXY }} 
+        XRAY_CONFIG: ${{ secrets.XRAY_CONFIG }} 
       run: |
-        wget -q https://github.com/ginuerzh/gost/releases/download/v2.11.5/gost-linux-amd64-2.11.5.gz
-        gunzip gost-linux-amd64-2.11.5.gz
-        chmod +x gost-linux-amd64-2.11.5
-        nohup ./gost-linux-amd64-2.11.5 -L :1080 -F "${PROXY_URL}" > gost.log 2>&1 &
+        # 下载并解压 Xray-core
+        wget -q https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
+        unzip -q Xray-linux-64.zip -d xray
+        chmod +x xray/xray
+        
+        # 将 Github Secret 中的 JSON 写入配置文件
+        echo "$XRAY_CONFIG" > xray/config.json
+        
+        # 后台启动 Xray
+        nohup ./xray/xray run -c xray/config.json > xray.log 2>&1 &
         sleep 5
-        curl -il -x socks5://127.0.0.1:1080 https://api.ipify.org
+        
+        # 测试 Xray 代理节点是否连通 (JSON中定义的本地端口是 10808)
+        curl -il -x socks5://127.0.0.1:10808 https://api.ipify.org
 
     - name: Run Script
       env:
-        PROXY: socks5://127.0.0.1:1080
-        TG_TOKEN: ${{ secrets.TG_TOKEN }}      # 映射 Secret
-        TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}  # 映射 Secret
-        SERVERS: ${{ secrets.SERVERS }}  # 映射 Secret
+        # 这里的端口必须对应 JSON 里的 "port": 10808
+        PROXY: socks5://127.0.0.1:10808
+        TG_TOKEN: ${{ secrets.TG_TOKEN }}      
+        TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}  
+        SERVERS: ${{ secrets.SERVERS }}  
       run: |
         # 使用 xvfb 运行以支持强力过人机验证模式
         xvfb-run -a python gaming4free.py
