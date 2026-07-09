@@ -42,8 +42,6 @@ class Game4FreeRenewal:
     def move_mouse_human(self, sb):
         try:
             for _ in range(3):
-                x = random.randint(100, 800)
-                y = random.randint(100, 600)
                 sb.slow_click("body", force=True)
                 time.sleep(random.uniform(0.5, 1.2))
         except:
@@ -55,7 +53,7 @@ class Game4FreeRenewal:
             sb.wait_for_element_visible('#sd-timer', timeout=15)
             time.sleep(1)
             remaining_text = sb.get_text('#sd-timer').strip()
-        except Exception as e:
+        except:
             try:
                 remaining_text = sb.execute_script("""
                     var el = document.querySelector('#sd-timer');
@@ -106,8 +104,6 @@ class Game4FreeRenewal:
         ) as sb:
             try:
                 self.log("✅ 浏览器已启动！")
-                
-                # 恢复 IP 检测，便于排查代理节点是否正常工作
                 self.log("🌍 正在检测出口 IP...")
                 try:
                     sb.open("https://api.ipify.org?format=json")
@@ -121,7 +117,7 @@ class Game4FreeRenewal:
                 sb.uc_open_with_reconnect(URL_APP_PANEL, reconnect_time=5)
                 self.human_wait(6, 10)
 
-                # 关闭 Cookie
+                # 关闭 Cookie 弹窗干扰
                 cookie_btns = [
                     '//button[contains(., "Continue with Recommended Cookies")]',
                     '//button[contains(., "Recommended Cookies")]',
@@ -142,7 +138,7 @@ class Game4FreeRenewal:
                 timestamp_before = self.get_remaining_time(sb)
                 self.log(f"🕒 初始时间: {timestamp_before}")
 
-                # 黄金居中滚动：确保面板完美处于中心 (事实证明这行极其有效，保留！)
+                # 黄金居中滚动：确保面板完美处于中心 (保留这个完美动作)
                 sb.execute_script("window.scrollTo(0, document.body.scrollHeight / 3);")
                 
                 try:
@@ -157,19 +153,48 @@ class Game4FreeRenewal:
                     self.task_results.append({"name": region, "status": "❌ 失败 (初始按钮)", "time": "未知"})
                     return
 
-                self.log("⏳ 开始迎战 Cloudflare...")
-                cf_indicators = ["verify you are human", "确认您是真人", "troubleshoot", "just a moment"]
-                for _ in range(10):
-                    sb.uc_gui_click_captcha()
-                    time.sleep(3)
-                    page_lower = sb.get_page_source().lower()
-                    if any(x in page_lower for x in cf_indicators):
-                        sb.uc_gui_handle_captcha()
+                # ================== 🌟 核心：深度穿透破盾 ==================
+                self.log("⏳ 开始迎战 Cloudflare (深度穿透模式)...")
+                cf_passed = False
+                for _ in range(12): # 给予 36 秒的破盾时间
+                    try:
+                        # 确保我们在主文档
+                        sb.switch_to_default_content()
+                        
+                        # 组合拳 1: 盲点主页上的 iframe 容器
+                        if sb.is_element_present('iframe[src*="cloudflare"]'):
+                            try: sb.click('iframe[src*="cloudflare"]', timeout=1)
+                            except: pass
+                            
+                        # 组合拳 2: 官方 GUI 破盾
+                        try: sb.uc_gui_click_captcha()
+                        except: pass
+                        
+                        # 组合拳 3: 切入 iframe 内部检查和贴脸点击
+                        sb.switch_to_frame('iframe[src*="cloudflare"]')
+                        frame_text = sb.get_text("body")
+                        
+                        if "Success" in frame_text or "成功" in frame_text:
+                            self.log("✅ 侦测到 Success! CF 验证盾已亮绿灯！")
+                            cf_passed = True
+                            sb.switch_to_default_content()
+                            break
+                            
+                        if "Verify you are human" in frame_text or "真人" in frame_text:
+                            try: sb.click('label', timeout=1) # 尝试点击内部标签
+                            except: 
+                                try: sb.click('body', timeout=1) # 盲点内部背景
+                                except: pass
+                                
+                        sb.switch_to_default_content()
                         time.sleep(3)
-                        page_lower = sb.get_page_source().lower()
-                    if not any(x in page_lower for x in cf_indicators):
-                        self.log("✅ Cloudflare 验证通过")
-                        break
+                    except Exception as e:
+                        sb.switch_to_default_content()
+                        time.sleep(3)
+                        
+                if not cf_passed:
+                    self.log("⚠️ 未能侦测到明确的绿灯信号，尝试强行继续...")
+                # ============================================================
 
                 try:
                     self.log("🖱️ 正在触发最终确认按钮...")
@@ -183,10 +208,14 @@ class Game4FreeRenewal:
                     self.task_results.append({"name": region, "status": "❌ 失败 (确认按钮)", "time": "未知"})
                     return
 
-                self.log("⏳ 静默等待 45 秒，让视频广告在后台跑完发放奖励 (严禁刷新页面)...")
-                time.sleep(45)
+                # 耐心等待并发放奖励
+                self.log("⏳ 按钮已按下！静默等待 50 秒让视频广告发奖...")
+                time.sleep(50)
+                
+                self.log("🔄 奖励应已到账，刷新页面以获取最新服务器状态...")
+                sb.refresh_page()
+                time.sleep(10)
 
-                # 直接提取原网页动态更新后的时间
                 timestamp_after = self.get_remaining_time(sb)
                 self.log(f"🕒 最终更新时间: {timestamp_after}")
                 
