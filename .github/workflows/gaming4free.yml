@@ -38,15 +38,24 @@ jobs:
         unzip -q Xray-linux-64.zip -d xray
         chmod +x xray/xray
         
-        # 将 Github Secret 中的 JSON 写入配置文件
-        echo "$XRAY_CONFIG" > xray/config.json
+        # 使用更安全的 EOF 方式写入多行 JSON，防止格式被破坏
+        cat << 'EOF' > xray/config.json
+        $XRAY_CONFIG
+        EOF
         
         # 后台启动 Xray
         nohup ./xray/xray run -c xray/config.json > xray.log 2>&1 &
         sleep 5
         
-        # 测试 Xray 代理节点是否连通 (JSON中定义的本地端口是 10808)
-        curl -il -x socks5://127.0.0.1:10808 https://api.ipify.org
+        # 检查 Xray 进程是否存活，如果挂了就打印具体报错日志
+        if ! pgrep -x "xray" > /dev/null; then
+            echo "❌ Xray 进程未启动或已崩溃！查看报错日志："
+            cat xray.log
+            exit 1
+        fi
+        
+        # 测试节点连通性
+        curl -il -x socks5://127.0.0.1:10808 https://api.ipify.org || (echo "❌ 代理测试失败，查看 Xray 日志:" && cat xray.log && exit 1)
 
     - name: Run Script
       env:
