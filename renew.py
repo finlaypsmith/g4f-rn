@@ -130,7 +130,8 @@ class Game4FreeRenewal:
                 self.log(f"🕒 初始时间: {timestamp_before}")
 
                 # ================== 核心动作 1：向下滚动并点击 ==================
-               sb.execute_script("window.scrollTo(0, document.body.scrollHeight / 3);")
+                # 🌟 修复：强制滚动到屏幕 1/3 的黄金中间位置，确保核心面板在可视区中央
+                sb.execute_script("window.scrollTo(0, document.body.scrollHeight / 3);")
                 
                 try:
                     self.log("🖱️ 正在点击初始按钮...")
