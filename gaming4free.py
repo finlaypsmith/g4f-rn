@@ -148,13 +148,6 @@ class Game4FreeRenewal:
             try:
                 self.log("✅ 浏览器已启动！")
 
-                # 在打开任何页面前，注入JS抹除 webdriver 痕迹
-                sb.add_js_snippet("""
-                    Object.defineProperty(navigator, 'webdriver', {
-                        get: () => undefined
-                    });
-                """)
-
                 # IP 检测
                 self.log("🌍 正在检测出口 IP...")
                 try:
