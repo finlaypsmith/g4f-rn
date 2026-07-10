@@ -186,7 +186,6 @@ class Game4FreeRenewal:
                 sb.execute_script("window.scrollBy(0,800);")
                 self.human_wait(2, 4)
                 
-                # 💥 【防御策略 1】首次清理广告
                 self.remove_ads(sb)
 
                 try:
@@ -194,32 +193,56 @@ class Game4FreeRenewal:
                     self.move_mouse_human_advanced(sb)
                     sb.wait_for_element_visible("#sd-vote-btn", timeout=10)
                     sb.click('#sd-vote-btn')
-                    self.human_wait(6, 10)
                 except Exception as e:
                     raise Exception(f"未找到打开模态框的按钮: {e}")
 
-                # 💥 【防御策略 2】再次清理弹窗里跟着一起加载出来的贴片广告
-                self.remove_ads(sb)
-
-                # 处理 Cloudflare 验证码 (真实 Iframe 探测法)
-                self.log("⏳ 探测是否加载了 Cloudflare Turnstile...")
-                cf_iframe_selector = 'iframe[src*="cloudflare"], iframe[title*="Cloudflare"]'
+                # ========================================================
+                # 💥 核心修改区：超强 Cloudflare Turnstile 对抗逻辑
+                # ========================================================
+                self.log("⏳ 给模态框和验证码预留 5 秒的加载时间...")
+                time.sleep(5) 
                 
-                if sb.is_element_present(cf_iframe_selector):
-                    self.log("🛡️ 发现 Cloudflare 验证框，正在尝试破解...")
-                    for _ in range(3):
-                        try:
-                            # 尝试将验证框滚动到可视区域中央
-                            sb.scroll_into_view(cf_iframe_selector)
-                        except:
-                            pass
-                        # 使用原生的 GUI 点击来勾选 checkbox
-                        sb.uc_gui_click_captcha()
-                        time.sleep(4)
-                else:
-                    self.log("✅ 未检测到验证框，当前 IP 暂时安全。")
+                self.remove_ads(sb)
+                
+                try:
+                    # 强行把弹出来的提交按钮滚动到屏幕正中央，确保上方的验证码一定在可视范围内！
+                    sb.execute_script("document.querySelector('#vm-submit').scrollIntoView({block: 'center'});")
+                    time.sleep(1)
+                except:
+                    pass
 
-                self.human_wait(3, 5)
+                self.log("📡 开始雷达扫描页面底层的 Cloudflare 元素...")
+                cf_found = False
+                
+                # 循环扫描 5 次，确保不会因为网络延迟漏掉
+                for _ in range(5):
+                    # 使用 JS 穿透查询，寻找验证框 Iframe 或 CF 生成的隐形凭证框
+                    if sb.execute_script("return !!document.querySelector('iframe[src*=\"challenges.cloudflare.com\"], iframe[src*=\"turnstile\"], [name=\"cf-turnstile-response\"]')"):
+                        cf_found = True
+                        break
+                    time.sleep(1)
+
+                if cf_found:
+                    self.log("🛡️ 成功锁定 Cloudflare 验证框，开始执行物理鼠标点击突破...")
+                    for attempt in range(3):
+                        try:
+                            # 调动虚拟显示器 Xvfb 的底层鼠标进行真实的 GUI 点击
+                            sb.uc_gui_click_captcha()
+                            time.sleep(4)
+                            
+                            # 终极校验：读取 DOM，如果有了凭证值，说明一定点成功了
+                            token = sb.execute_script("return document.querySelector('[name=\"cf-turnstile-response\"]') ? document.querySelector('[name=\"cf-turnstile-response\"]').value : ''")
+                            if token:
+                                self.log("✅ Turnstile 验证已成功，顺利获取 Token 凭证！")
+                                break
+                        except Exception as e:
+                            self.log(f"⚠️ 破解尝试 {attempt+1} 出现小偏差，继续重试...")
+                        time.sleep(2)
+                else:
+                    self.log("✅ 深度扫描未发现验证框，当前 IP 免检。")
+                # ========================================================
+
+                self.human_wait(2, 4)
 
                 try:
                     self.log("🖱️ 正在点击最终提交按钮 'VOTE — ADDS 90 MINUTES'...")
@@ -235,12 +258,12 @@ class Game4FreeRenewal:
                 timestamp_after = self.get_remaining_time(sb)
                 self.log(f"🕒 续期后剩余运行时间: {timestamp_after}")
 
-                # 💥 【防御策略 3】严格校验续期是否真实生效
+                # 严格校验续期是否真实生效
                 sec_before = self.time_to_seconds(timestamp_before)
                 sec_after = self.time_to_seconds(timestamp_after)
                 
                 if sec_after > 0 and sec_before > 0:
-                    if sec_after <= sec_before + 120:  # 允许最多 2 分钟的容差（脚本运行流逝的时间）
+                    if sec_after <= sec_before + 120:  # 允许最多 2 分钟的容差
                         raise Exception("时间并未增加！人机验证失败或提交请求被服务器拦截。")
 
                 final_screenshot = f"{self.screenshot_dir}/final_success_{server_num}.png"
