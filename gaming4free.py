@@ -53,32 +53,40 @@ class Game4FreeRenewal:
         except:
             return 0
 
-    def clear_blocking_ads(self, sb):
-        """清理可能遮挡 Turnstile/提交按钮的广告层（不触碰 Cloudflare iframe）"""
+    def _safe_attr(self, sb, selector, attr, default=None):
+        """
+        用高层 API 读取属性，避开 sb.execute_script 在 UC 连接/断连(CDP)两种路径下
+        对 return 语句的相反要求（连接态需 return、断连态顶层 return 非法）。
+        """
         try:
-            removed = sb.execute_script("""
-                return (function(){
+            if not sb.is_element_present(selector):
+                return default
+            v = sb.get_attribute(selector, attr, timeout=2)
+            return v if v is not None else default
+        except Exception:
+            return default
+
+    def clear_blocking_ads(self, sb):
+        """清理可能遮挡 Turnstile/提交按钮的广告层（不触碰 Cloudflare iframe）。
+        纯副作用脚本：用无顶层 return 的 IIFE，连接态/断连态都不会报 Illegal return。"""
+        try:
+            sb.execute_script("""(function(){
+                try {
                     var sel = 'ins, iframe[src*="google"], iframe[src*="doubleclick"], '
                             + 'div[id^="google_ads"], div[class*="ad-"], div[id^="ad_"], '
                             + 'div[class*="overlay"][style*="z-index"], '
                             + '[id*="sp_message"], .fc-consent-root';
                     var nodes = document.querySelectorAll(sel);
-                    var n = 0;
                     for (var i = 0; i < nodes.length; i++) {
                         var el = nodes[i];
-                        // 绝不动 Cloudflare / Turnstile 相关节点
                         var html = (el.outerHTML || '').toLowerCase();
                         if (html.indexOf('cloudflare') >= 0 || html.indexOf('turnstile') >= 0 || html.indexOf('cf-') >= 0) {
                             continue;
                         }
                         el.remove();
-                        n++;
                     }
-                    return n;
-                })();
-            """)
-            if removed:
-                self.log(f"🧹 已清理 {removed} 个可能遮挡的广告/浮层节点")
+                } catch (e) {}
+            })();""")
         except Exception:
             pass
 
@@ -90,115 +98,82 @@ class Game4FreeRenewal:
         的投票模态框。在代理/自动化环境中激励广告往往无填充、Promise 永不 resolve，
         导致模态框永不打开——这是"时间不增加"的首要根因。
         这里将该方法覆盖为立即 resolve，使点击 VOTE 后模态框能正常打开。
+        纯副作用脚本：无顶层 return，是否生效由随后模态框是否打开来验证。
         """
         try:
-            ok = sb.execute_script("""
-                return (function(){
-                    try {
-                        window.ramp = window.ramp || {};
-                        if (!window.ramp.que || typeof window.ramp.que.push !== 'function') {
-                            window.ramp.que = { push: function(f){ try{ f(); }catch(e){} } };
-                        }
-                        window.ramp.manuallyCreateRewardUi = function(){ return Promise.resolve(); };
-                        window.ramp.spaAddAds = window.ramp.spaAddAds || function(){};
-                        return true;
-                    } catch (e) { return false; }
-                })();
-            """)
-            if ok:
-                self.log("🎟️ 已短路激励广告门槛（manuallyCreateRewardUi 立即放行）")
-            else:
-                self.log("⚠️ 激励广告短路脚本执行返回 false")
+            sb.execute_script("""(function(){
+                try {
+                    window.ramp = window.ramp || {};
+                    if (!window.ramp.que || typeof window.ramp.que.push !== 'function') {
+                        window.ramp.que = { push: function(f){ try{ f(); }catch(e){} } };
+                    }
+                    window.ramp.manuallyCreateRewardUi = function(){ return Promise.resolve(); };
+                    window.ramp.spaAddAds = window.ramp.spaAddAds || function(){};
+                } catch (e) {}
+            })();""")
+            self.log("🎟️ 已短路激励广告门槛（manuallyCreateRewardUi 立即放行）")
         except Exception as e:
             self.log(f"⚠️ 激励广告短路注入失败: {e}")
 
+    def is_vote_modal_open(self, sb):
+        """投票模态框是否打开（vote-overlay 带 open class）——用高层 API 判断"""
+        try:
+            return sb.is_element_visible("#vote-overlay.open") or sb.is_element_visible(".vote-modal")
+        except Exception:
+            return False
+
     def wait_for_vote_modal(self, sb, timeout=25):
-        """等待投票模态框真正打开（vote-overlay 处于 open/可见）"""
+        """等待投票模态框真正打开"""
         for _ in range(timeout):
-            try:
-                opened = sb.execute_script("""
-                    return (function(){
-                        var ov = document.querySelector('#vote-overlay');
-                        if (!ov) return false;
-                        var cs = getComputedStyle(ov);
-                        return ov.classList.contains('open') || cs.display !== 'none';
-                    })();
-                """)
-                if opened:
-                    return True
-            except Exception:
-                pass
+            if self.is_vote_modal_open(sb):
+                return True
             time.sleep(1)
         return False
 
     def get_turnstile_token(self, sb):
-        """读取 Cloudflare Turnstile 凭证；有值即表示验证已通过（优先用官方 getResponse）"""
-        try:
-            return sb.execute_script("""
-                return (function(){
-                    // 1) 官方 API：与页面提交逻辑 window.turnstile.getResponse() 完全一致
-                    try {
-                        if (window.turnstile && typeof window.turnstile.getResponse === 'function') {
-                            var r = window.turnstile.getResponse();
-                            if (r && r.length > 20) return r;
-                        }
-                    } catch (e) {}
-                    // 2) 隐藏字段兜底
-                    var el = document.querySelector('[name="cf-turnstile-response"]');
-                    if (el && el.value && el.value.length > 20) return el.value;
-                    return '';
-                })();
-            """) or ""
-        except Exception:
-            return ""
+        """读取 Cloudflare Turnstile 凭证（隐藏字段 value）；有值即表示验证已通过。
+        Turnstile 成功后会把 token 写入 [name=cf-turnstile-response] 的 value。"""
+        val = self._safe_attr(sb, '[name="cf-turnstile-response"]', 'value', '') or ""
+        return val if len(val) > 20 else ""
 
     def is_submit_enabled(self, sb):
         """
-        #vm-submit 由 Turnstile 的 callback 直接解禁（disabled=false）。
+        #vm-submit 由 Turnstile 的 callback 直接解禁（移除 disabled 属性）。
         这是页面自身认定"验证通过"的权威信号，比探测 iframe 更可靠。
+        get_attribute('disabled') 在禁用时返回 'true'/'disabled'，启用时返回 None。
         """
         try:
-            return bool(sb.execute_script("""
-                return (function(){
-                    var b = document.querySelector('#vm-submit');
-                    return b ? (!b.disabled && b.getAttribute('aria-disabled') !== 'true') : false;
-                })();
-            """))
+            if not sb.is_element_present("#vm-submit"):
+                return False
+            return self._safe_attr(sb, "#vm-submit", "disabled", None) is None
         except Exception:
             return False
 
     def solve_turnstile(self, sb, server_num):
         """
         解模态框内的 Cloudflare Turnstile。
-        成功信号 = #vm-submit 解禁 或 turnstile.getResponse() 拿到 token。
+        成功信号 = #vm-submit 解禁 或 [cf-turnstile-response] 拿到 token。
         始终拿不到则返回 False（fail-closed），绝不带空凭证提交。
         """
         self.log("📡 等待 Turnstile 组件渲染...")
-        # 等 widget 渲染出 iframe / 或已自动通过
         for _ in range(15):
             if self.is_submit_enabled(sb) or self.get_turnstile_token(sb):
                 self.log("✅ Turnstile 已通过（无需手动点击）")
                 return True
-            has_iframe = False
-            try:
-                has_iframe = bool(sb.execute_script(
-                    "return !!document.querySelector('iframe[src*=\"challenges.cloudflare.com\"], iframe[src*=\"turnstile\"]')"
-                ))
-            except Exception:
-                pass
-            if has_iframe:
+            if sb.is_element_present('iframe[src*="challenges.cloudflare.com"]') \
+               or sb.is_element_present('iframe[src*="turnstile"]'):
                 break
             time.sleep(1)
 
         self.log("🛡️ 尝试点击 Turnstile 验证框...")
-        # 把验证框滚到视口中心，避免 GUI 物理点击打偏
+        # 把验证框滚到视口中心（纯副作用 IIFE，无顶层 return）
         try:
-            sb.execute_script("""
+            sb.execute_script("""(function(){
                 var t = document.querySelector(
                     'iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"], #ts-widget, .cf-turnstile'
                 );
                 if (t) t.scrollIntoView({block: 'center', inline: 'center'});
-            """)
+            })();""")
             time.sleep(1)
         except Exception:
             pass
@@ -211,7 +186,6 @@ class Game4FreeRenewal:
         ]
 
         for attempt in range(1, 5):
-            # 每轮开始先检查是否已经通过（Turnstile 可能无交互自动放行）
             if self.is_submit_enabled(sb) or self.get_turnstile_token(sb):
                 token = self.get_turnstile_token(sb)
                 self.log(f"✅ Turnstile 验证成功（submit 已解禁，token 长度 {len(token)}）")
@@ -224,7 +198,6 @@ class Game4FreeRenewal:
             except Exception as e:
                 self.log(f"⚠️ 策略 {strategy_name} 异常: {e}")
 
-            # 出 token / 解禁有延迟，轮询等待
             for _ in range(6):
                 time.sleep(1.5)
                 if self.is_submit_enabled(sb) or self.get_turnstile_token(sb):
@@ -232,18 +205,16 @@ class Game4FreeRenewal:
                     self.log(f"✅ Turnstile 验证成功（策略 {strategy_name}，token 长度 {len(token)}）")
                     return True
 
-        # 失败诊断
+        # 失败诊断（全部用高层 API 读取，避免 execute_script 路径歧义）
         try:
-            diag = sb.execute_script("""
-                return {
-                    hasIframe: !!document.querySelector('iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"]'),
-                    modalOpen: (function(){ var o=document.querySelector('#vote-overlay'); return o ? o.classList.contains('open') : null; })(),
-                    submitDisabled: (function(){ var b=document.querySelector('#vm-submit'); return b ? !!b.disabled : null; })(),
-                    tokenLen: (function(){ try { var r = window.turnstile && window.turnstile.getResponse ? window.turnstile.getResponse() : ''; return r ? r.length : 0; } catch(e){ return -1; } })(),
-                    bodySnippet: (document.body && document.body.innerText || '').slice(0, 200)
-                };
-            """)
-            self.log(f"🩺 验证失败诊断: {json.dumps(diag, ensure_ascii=False) if isinstance(diag, dict) else diag}")
+            diag = {
+                "modalOpen": self.is_vote_modal_open(sb),
+                "hasIframe": sb.is_element_present('iframe[src*="challenges.cloudflare.com"]')
+                             or sb.is_element_present('iframe[src*="turnstile"]'),
+                "submitDisabled": self._safe_attr(sb, "#vm-submit", "disabled", "N/A"),
+                "tokenLen": len(self.get_turnstile_token(sb)),
+            }
+            self.log(f"🩺 验证失败诊断: {json.dumps(diag, ensure_ascii=False)}")
         except Exception:
             pass
 
@@ -257,11 +228,14 @@ class Game4FreeRenewal:
         return False
 
     def move_mouse_human_advanced(self, sb):
-        """生成更复杂的随机鼠标移动轨迹"""
+        """生成更复杂的随机鼠标移动轨迹（纯副作用，用高层 API 取窗口尺寸）"""
         try:
             time.sleep(random.uniform(0.1, 0.4))
-            width = sb.execute_script("return window.innerWidth;")
-            height = sb.execute_script("return window.innerHeight;")
+            try:
+                size = sb.get_window_size()
+                width, height = int(size.get('width', 1280)), int(size.get('height', 800))
+            except Exception:
+                width, height = 1280, 800
 
             regions = [
                 (0.1 * width, 0.1 * height, 0.4 * width, 0.4 * height),
@@ -277,7 +251,7 @@ class Game4FreeRenewal:
                 x_offset = random.randint(-5, 5)
                 y_offset = random.randint(-5, 5)
 
-                sb.execute_script(f"""
+                sb.execute_script(f"""(function(){{
                     var evt = new MouseEvent("mousemove", {{
                         bubbles: true,
                         cancelable: true,
@@ -285,7 +259,7 @@ class Game4FreeRenewal:
                         clientY: {y_dest + y_offset}
                     }});
                     document.body.dispatchEvent(evt);
-                """)
+                }})();""")
                 time.sleep(random.uniform(0.8, 1.5))
         except:
             pass
@@ -296,17 +270,11 @@ class Game4FreeRenewal:
             sb.wait_for_element_visible('#sd-timer', timeout=15)
             time.sleep(1)
             remaining_text = sb.get_text('#sd-timer').strip()
-        except Exception as e:
+        except Exception:
             try:
-                remaining_text = sb.execute_script("""
-                    return (function(){
-                        var el = document.querySelector('#sd-timer');
-                        return el ? el.innerText.trim() : null;
-                    })();
-                """)
-                if not remaining_text:
-                    remaining_text = "未知"
-            except:
+                # 高层 API 兜底，避免 execute_script 的 return 路径歧义
+                remaining_text = (sb.get_text('#sd-timer') or "").strip() or "未知"
+            except Exception:
                 remaining_text = "未知"
         return remaining_text
 
@@ -393,7 +361,9 @@ class Game4FreeRenewal:
                     # 兜底：某些时序下 ramp 覆盖晚于点击，再补一次并直接调用打开逻辑
                     self.bypass_reward_ad(sb)
                     try:
-                        sb.execute_script("if (typeof openVoteModal === 'function') openVoteModal();")
+                        sb.execute_script("""(function(){
+                            if (typeof openVoteModal === 'function') openVoteModal();
+                        })();""")
                     except Exception:
                         pass
                     if not self.wait_for_vote_modal(sb, timeout=15):
@@ -401,7 +371,10 @@ class Game4FreeRenewal:
                 self.log("✅ 投票模态框已打开")
 
                 try:
-                    sb.execute_script("document.querySelector('#vm-submit').scrollIntoView({block: 'center'});")
+                    sb.execute_script("""(function(){
+                        var s = document.querySelector('#vm-submit');
+                        if (s) s.scrollIntoView({block: 'center'});
+                    })();""")
                     time.sleep(1)
                 except:
                     pass
@@ -424,28 +397,23 @@ class Game4FreeRenewal:
                 except Exception as e:
                     raise Exception("未能点击最终的确认提交按钮，可能是广告仍未加载完成导致按钮未激活。")
 
-                # 优先用页面自身的结果提示 #vm-msg 精确判定（成功会带 'ok' class 与提示文案）
+                # 用页面自身的结果提示 #vm-msg 精确判定：成功会带 'ok' class，失败带 'err'
+                # class。全程用高层 API 读取，规避 execute_script 的 return 路径歧义。
                 vote_result = None
                 for _ in range(10):
+                    cls = (self._safe_attr(sb, "#vm-msg", "class", "") or "").lower()
                     try:
-                        vote_result = sb.execute_script("""
-                            return (function(){
-                                var m = document.querySelector('#vm-msg');
-                                if (!m) return null;
-                                var cls = m.className || '';
-                                var txt = (m.textContent || '').trim();
-                                if (cls.indexOf('ok') >= 0) return {ok: true, text: txt};
-                                if (cls.indexOf('err') >= 0 || cls.indexOf('error') >= 0) return {ok: false, text: txt};
-                                if (txt && txt.toLowerCase() !== 'submitting…' && txt.toLowerCase() !== 'submitting...') {
-                                    return {pending: true, text: txt};
-                                }
-                                return null;
-                            })();
-                        """)
+                        txt = (sb.get_text("#vm-msg") or "").strip()
                     except Exception:
-                        vote_result = None
-                    if vote_result and (vote_result.get('ok') or vote_result.get('ok') is False):
+                        txt = ""
+                    if "ok" in cls:
+                        vote_result = {"ok": True, "text": txt}
                         break
+                    if "err" in cls or "error" in cls:
+                        vote_result = {"ok": False, "text": txt}
+                        break
+                    if txt and txt.lower() not in ("submitting…", "submitting..."):
+                        vote_result = {"pending": True, "text": txt}
                     time.sleep(1.5)
 
                 if isinstance(vote_result, dict) and vote_result.get('ok') is False:
