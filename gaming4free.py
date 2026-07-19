@@ -178,32 +178,32 @@ class Game4FreeRenewal:
         except Exception:
             pass
 
-        strategies = [
-            ("uc_gui_click_captcha", lambda: sb.uc_gui_click_captcha()),
-            ("uc_gui_click_captcha(retry)", lambda: sb.uc_gui_click_captcha(retry=True)),
-            ("uc_gui_click_captcha(blind)", lambda: sb.uc_gui_click_captcha(blind=True)),
-            ("uc_gui_handle_captcha", lambda: sb.uc_gui_handle_captcha()),
-        ]
-
-        for attempt in range(1, 5):
+        # 只用纯 GUI 点击 uc_gui_click_captcha()（默认 frame，SeleniumBase 会 fallback
+        # 匹配 [class="cf-turnstile"] 外层 widget，坐标最准）。
+        # 绝不用 retry=True / blind=True / uc_gui_handle_captcha —— 源码显示它们会
+        # uc_open_with_reconnect(当前URL) 重载页面，而本站 Turnstile 在点 VOTE 后弹出的
+        # SPA 模态框里，重载会销毁模态框和广告门槛状态，导致必败。
+        for attempt in range(1, 7):
             if self.is_submit_enabled(sb) or self.get_turnstile_token(sb):
                 token = self.get_turnstile_token(sb)
                 self.log(f"✅ Turnstile 验证成功（submit 已解禁，token 长度 {len(token)}）")
                 return True
 
-            strategy_name, strategy_fn = strategies[(attempt - 1) % len(strategies)]
             try:
-                self.log(f"🖱️ 验证尝试 {attempt}/4 使用策略: {strategy_name}")
-                strategy_fn()
+                self.log(f"🖱️ Turnstile 纯点击尝试 {attempt}/6 ...")
+                sb.uc_gui_click_captcha()
             except Exception as e:
-                self.log(f"⚠️ 策略 {strategy_name} 异常: {e}")
+                self.log(f"⚠️ 点击尝试 {attempt} 异常: {e}")
 
-            for _ in range(6):
+            # 出 token / 解禁有延迟，轮询等待
+            for _ in range(5):
                 time.sleep(1.5)
                 if self.is_submit_enabled(sb) or self.get_turnstile_token(sb):
                     token = self.get_turnstile_token(sb)
-                    self.log(f"✅ Turnstile 验证成功（策略 {strategy_name}，token 长度 {len(token)}）")
+                    self.log(f"✅ Turnstile 验证成功（尝试 {attempt}，token 长度 {len(token)}）")
                     return True
+            # 模态框可能被广告浮层遮挡，清一次再重试（不碰 CF 节点）
+            self.clear_blocking_ads(sb)
 
         # 失败诊断（全部用高层 API 读取，避免 execute_script 路径歧义）
         try:
