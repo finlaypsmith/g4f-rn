@@ -57,23 +57,25 @@ class Game4FreeRenewal:
         """清理可能遮挡 Turnstile/提交按钮的广告层（不触碰 Cloudflare iframe）"""
         try:
             removed = sb.execute_script("""
-                var sel = 'ins, iframe[src*="google"], iframe[src*="doubleclick"], '
-                        + 'div[id^="google_ads"], div[class*="ad-"], div[id^="ad_"], '
-                        + 'div[class*="overlay"][style*="z-index"], '
-                        + '[id*="sp_message"], .fc-consent-root';
-                var nodes = document.querySelectorAll(sel);
-                var n = 0;
-                for (var i = 0; i < nodes.length; i++) {
-                    var el = nodes[i];
-                    // 绝不动 Cloudflare / Turnstile 相关节点
-                    var html = (el.outerHTML || '').toLowerCase();
-                    if (html.indexOf('cloudflare') >= 0 || html.indexOf('turnstile') >= 0 || html.indexOf('cf-') >= 0) {
-                        continue;
+                return (function(){
+                    var sel = 'ins, iframe[src*="google"], iframe[src*="doubleclick"], '
+                            + 'div[id^="google_ads"], div[class*="ad-"], div[id^="ad_"], '
+                            + 'div[class*="overlay"][style*="z-index"], '
+                            + '[id*="sp_message"], .fc-consent-root';
+                    var nodes = document.querySelectorAll(sel);
+                    var n = 0;
+                    for (var i = 0; i < nodes.length; i++) {
+                        var el = nodes[i];
+                        // 绝不动 Cloudflare / Turnstile 相关节点
+                        var html = (el.outerHTML || '').toLowerCase();
+                        if (html.indexOf('cloudflare') >= 0 || html.indexOf('turnstile') >= 0 || html.indexOf('cf-') >= 0) {
+                            continue;
+                        }
+                        el.remove();
+                        n++;
                     }
-                    el.remove();
-                    n++;
-                }
-                return n;
+                    return n;
+                })();
             """)
             if removed:
                 self.log(f"🧹 已清理 {removed} 个可能遮挡的广告/浮层节点")
@@ -91,15 +93,17 @@ class Game4FreeRenewal:
         """
         try:
             ok = sb.execute_script("""
-                try {
-                    window.ramp = window.ramp || {};
-                    if (!window.ramp.que || typeof window.ramp.que.push !== 'function') {
-                        window.ramp.que = { push: function(f){ try{ f(); }catch(e){} } };
-                    }
-                    window.ramp.manuallyCreateRewardUi = function(){ return Promise.resolve(); };
-                    window.ramp.spaAddAds = window.ramp.spaAddAds || function(){};
-                    return true;
-                } catch (e) { return false; }
+                return (function(){
+                    try {
+                        window.ramp = window.ramp || {};
+                        if (!window.ramp.que || typeof window.ramp.que.push !== 'function') {
+                            window.ramp.que = { push: function(f){ try{ f(); }catch(e){} } };
+                        }
+                        window.ramp.manuallyCreateRewardUi = function(){ return Promise.resolve(); };
+                        window.ramp.spaAddAds = window.ramp.spaAddAds || function(){};
+                        return true;
+                    } catch (e) { return false; }
+                })();
             """)
             if ok:
                 self.log("🎟️ 已短路激励广告门槛（manuallyCreateRewardUi 立即放行）")
@@ -113,10 +117,12 @@ class Game4FreeRenewal:
         for _ in range(timeout):
             try:
                 opened = sb.execute_script("""
-                    var ov = document.querySelector('#vote-overlay');
-                    if (!ov) return false;
-                    var cs = getComputedStyle(ov);
-                    return ov.classList.contains('open') || cs.display !== 'none';
+                    return (function(){
+                        var ov = document.querySelector('#vote-overlay');
+                        if (!ov) return false;
+                        var cs = getComputedStyle(ov);
+                        return ov.classList.contains('open') || cs.display !== 'none';
+                    })();
                 """)
                 if opened:
                     return True
@@ -129,17 +135,19 @@ class Game4FreeRenewal:
         """读取 Cloudflare Turnstile 凭证；有值即表示验证已通过（优先用官方 getResponse）"""
         try:
             return sb.execute_script("""
-                // 1) 官方 API：与页面提交逻辑 window.turnstile.getResponse() 完全一致
-                try {
-                    if (window.turnstile && typeof window.turnstile.getResponse === 'function') {
-                        var r = window.turnstile.getResponse();
-                        if (r && r.length > 20) return r;
-                    }
-                } catch (e) {}
-                // 2) 隐藏字段兜底
-                var el = document.querySelector('[name="cf-turnstile-response"]');
-                if (el && el.value && el.value.length > 20) return el.value;
-                return '';
+                return (function(){
+                    // 1) 官方 API：与页面提交逻辑 window.turnstile.getResponse() 完全一致
+                    try {
+                        if (window.turnstile && typeof window.turnstile.getResponse === 'function') {
+                            var r = window.turnstile.getResponse();
+                            if (r && r.length > 20) return r;
+                        }
+                    } catch (e) {}
+                    // 2) 隐藏字段兜底
+                    var el = document.querySelector('[name="cf-turnstile-response"]');
+                    if (el && el.value && el.value.length > 20) return el.value;
+                    return '';
+                })();
             """) or ""
         except Exception:
             return ""
@@ -151,8 +159,10 @@ class Game4FreeRenewal:
         """
         try:
             return bool(sb.execute_script("""
-                var b = document.querySelector('#vm-submit');
-                return b ? (!b.disabled && b.getAttribute('aria-disabled') !== 'true') : false;
+                return (function(){
+                    var b = document.querySelector('#vm-submit');
+                    return b ? (!b.disabled && b.getAttribute('aria-disabled') !== 'true') : false;
+                })();
             """))
         except Exception:
             return False
@@ -289,8 +299,10 @@ class Game4FreeRenewal:
         except Exception as e:
             try:
                 remaining_text = sb.execute_script("""
-                    var el = document.querySelector('#sd-timer');
-                    return el ? el.innerText.trim() : null;
+                    return (function(){
+                        var el = document.querySelector('#sd-timer');
+                        return el ? el.innerText.trim() : null;
+                    })();
                 """)
                 if not remaining_text:
                     remaining_text = "未知"
@@ -417,16 +429,18 @@ class Game4FreeRenewal:
                 for _ in range(10):
                     try:
                         vote_result = sb.execute_script("""
-                            var m = document.querySelector('#vm-msg');
-                            if (!m) return null;
-                            var cls = m.className || '';
-                            var txt = (m.textContent || '').trim();
-                            if (cls.indexOf('ok') >= 0) return {ok: true, text: txt};
-                            if (cls.indexOf('err') >= 0 || cls.indexOf('error') >= 0) return {ok: false, text: txt};
-                            if (txt && txt.toLowerCase() !== 'submitting…' && txt.toLowerCase() !== 'submitting...') {
-                                return {pending: true, text: txt};
-                            }
-                            return null;
+                            return (function(){
+                                var m = document.querySelector('#vm-msg');
+                                if (!m) return null;
+                                var cls = m.className || '';
+                                var txt = (m.textContent || '').trim();
+                                if (cls.indexOf('ok') >= 0) return {ok: true, text: txt};
+                                if (cls.indexOf('err') >= 0 || cls.indexOf('error') >= 0) return {ok: false, text: txt};
+                                if (txt && txt.toLowerCase() !== 'submitting…' && txt.toLowerCase() !== 'submitting...') {
+                                    return {pending: true, text: txt};
+                                }
+                                return null;
+                            })();
                         """)
                     except Exception:
                         vote_result = None
