@@ -53,6 +53,185 @@ class Game4FreeRenewal:
         except:
             return 0
 
+    def clear_blocking_ads(self, sb):
+        """清理可能遮挡 Turnstile/提交按钮的广告层（不触碰 Cloudflare iframe）"""
+        try:
+            removed = sb.execute_script("""
+                var sel = 'ins, iframe[src*="google"], iframe[src*="doubleclick"], '
+                        + 'div[id^="google_ads"], div[class*="ad-"], div[id^="ad_"], '
+                        + 'div[class*="overlay"][style*="z-index"], '
+                        + '[id*="sp_message"], .fc-consent-root';
+                var nodes = document.querySelectorAll(sel);
+                var n = 0;
+                for (var i = 0; i < nodes.length; i++) {
+                    var el = nodes[i];
+                    // 绝不动 Cloudflare / Turnstile 相关节点
+                    var html = (el.outerHTML || '').toLowerCase();
+                    if (html.indexOf('cloudflare') >= 0 || html.indexOf('turnstile') >= 0 || html.indexOf('cf-') >= 0) {
+                        continue;
+                    }
+                    el.remove();
+                    n++;
+                }
+                return n;
+            """)
+            if removed:
+                self.log(f"🧹 已清理 {removed} 个可能遮挡的广告/浮层节点")
+        except Exception:
+            pass
+
+    def get_turnstile_token(self, sb):
+        """读取 Cloudflare Turnstile 凭证；有值即表示验证已通过"""
+        try:
+            return sb.execute_script("""
+                var selectors = [
+                    '[name="cf-turnstile-response"]',
+                    'textarea[name="cf-turnstile-response"]',
+                    'input[name="cf-turnstile-response"]',
+                    '[name="g-recaptcha-response"]'
+                ];
+                for (var i = 0; i < selectors.length; i++) {
+                    var el = document.querySelector(selectors[i]);
+                    if (el && el.value && el.value.length > 20) {
+                        return el.value;
+                    }
+                }
+                // 某些站点把 token 挂在 turnstile widget 的 data 属性上
+                var widget = document.querySelector('[data-sitekey], .cf-turnstile, #cf-turnstile');
+                if (widget) {
+                    var t = widget.getAttribute('data-response') || widget.getAttribute('data-token');
+                    if (t && t.length > 20) return t;
+                }
+                return '';
+            """) or ""
+        except Exception:
+            return ""
+
+    def has_cloudflare_widget(self, sb):
+        """探测页面是否存在 Cloudflare Turnstile 组件"""
+        try:
+            return bool(sb.execute_script("""
+                return !!(
+                    document.querySelector('iframe[src*="challenges.cloudflare.com"]')
+                    || document.querySelector('iframe[src*="turnstile"]')
+                    || document.querySelector('iframe[title*="Cloudflare"]')
+                    || document.querySelector('[name="cf-turnstile-response"]')
+                    || document.querySelector('.cf-turnstile')
+                    || document.querySelector('#cf-turnstile')
+                );
+            """))
+        except Exception:
+            return False
+
+    def solve_turnstile(self, sb, server_num):
+        """
+        解 Cloudflare Turnstile。
+        成功返回 True；探测到验证框却始终拿不到 token 时返回 False（fail-closed）。
+        未探测到验证框则视为免检，返回 True。
+        """
+        self.log("📡 开始扫描 Cloudflare 验证框...")
+        cf_found = False
+        for _ in range(8):
+            if self.has_cloudflare_widget(sb):
+                cf_found = True
+                break
+            # 可能已经自动通过
+            if self.get_turnstile_token(sb):
+                self.log("✅ 已存在 Turnstile 凭证，无需手动点击")
+                return True
+            time.sleep(1)
+
+        if not cf_found:
+            # 再等一小会，部分站点延迟注入 widget
+            time.sleep(2)
+            if self.get_turnstile_token(sb):
+                self.log("✅ 延迟检测到 Turnstile 凭证")
+                return True
+            if not self.has_cloudflare_widget(sb):
+                self.log("✅ 扫描未发现验证框，当前 IP 免检")
+                return True
+            cf_found = True
+
+        self.log("🛡️ 锁定 Cloudflare 验证框，执行物理点击...")
+        self.clear_blocking_ads(sb)
+
+        # 尽量把验证框滚到视口中心，避免 GUI 点击打偏
+        try:
+            sb.execute_script("""
+                var iframe = document.querySelector(
+                    'iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"], iframe[title*="Cloudflare"]'
+                );
+                var widget = document.querySelector('.cf-turnstile, #cf-turnstile, [data-sitekey]');
+                var target = iframe || widget;
+                if (target) {
+                    target.scrollIntoView({block: 'center', inline: 'center'});
+                } else {
+                    var submit = document.querySelector('#vm-submit');
+                    if (submit) submit.scrollIntoView({block: 'center'});
+                }
+            """)
+            time.sleep(1)
+        except Exception:
+            pass
+
+        strategies = [
+            ("uc_gui_click_captcha", lambda: sb.uc_gui_click_captcha()),
+            ("uc_gui_click_captcha(retry)", lambda: sb.uc_gui_click_captcha(retry=True)),
+            ("uc_gui_click_captcha(blind)", lambda: sb.uc_gui_click_captcha(blind=True)),
+            ("uc_gui_handle_captcha", lambda: sb.uc_gui_handle_captcha()),
+        ]
+
+        for attempt in range(1, 5):
+            strategy_name, strategy_fn = strategies[(attempt - 1) % len(strategies)]
+            try:
+                self.log(f"🖱️ 验证尝试 {attempt}/4 使用策略: {strategy_name}")
+                strategy_fn()
+            except Exception as e:
+                self.log(f"⚠️ 策略 {strategy_name} 异常: {e}")
+
+            # Turnstile 出 token 有时需要数秒
+            for wait_i in range(6):
+                time.sleep(1.5)
+                token = self.get_turnstile_token(sb)
+                if token:
+                    self.log(f"✅ Turnstile 验证成功（token 长度 {len(token)}，策略 {strategy_name}）")
+                    return True
+
+            self.clear_blocking_ads(sb)
+
+        # 失败诊断
+        token = self.get_turnstile_token(sb)
+        try:
+            diag = sb.execute_script("""
+                return {
+                    hasIframe: !!document.querySelector('iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"]'),
+                    hasResponseField: !!document.querySelector('[name="cf-turnstile-response"]'),
+                    responseLen: (document.querySelector('[name="cf-turnstile-response"]') || {}).value
+                        ? document.querySelector('[name="cf-turnstile-response"]').value.length : 0,
+                    submitDisabled: (function() {
+                        var b = document.querySelector('#vm-submit');
+                        return b ? (!!b.disabled || b.getAttribute('aria-disabled') === 'true') : null;
+                    })(),
+                    bodySnippet: (document.body && document.body.innerText || '').slice(0, 300)
+                };
+            """)
+            self.log(f"🩺 验证失败诊断: {json.dumps(diag, ensure_ascii=False) if isinstance(diag, dict) else diag}")
+        except Exception:
+            pass
+
+        try:
+            fail_shot = f"{self.screenshot_dir}/captcha_fail_{server_num}.png"
+            sb.save_screenshot(fail_shot)
+            self.log(f"📸 已保存验证失败截图: {fail_shot}")
+        except Exception:
+            pass
+
+        if token:
+            self.log(f"✅ 末次检查拿到 token（长度 {len(token)}）")
+            return True
+
+        return False
+
     def move_mouse_human_advanced(self, sb):
         """生成更复杂的随机鼠标移动轨迹"""
         try:
@@ -73,7 +252,7 @@ class Game4FreeRenewal:
                 y_dest = random.randint(int(target_region[1]), int(target_region[3]))
                 x_offset = random.randint(-5, 5)
                 y_offset = random.randint(-5, 5)
-                
+
                 sb.execute_script(f"""
                     var evt = new MouseEvent("mousemove", {{
                         bubbles: true,
@@ -127,7 +306,7 @@ class Game4FreeRenewal:
         self.log("=" * 40)
         self.log(f"🚀 开始续期 [{region}] ({server_num})")
         
-        USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
 
         with SB(
             uc=True,
@@ -188,35 +367,17 @@ class Game4FreeRenewal:
                 except:
                     pass
 
-                self.log("📡 开始扫描")
-                cf_found = False
-                for _ in range(5):
-                    if sb.execute_script("return !!document.querySelector('iframe[src*=\"challenges.cloudflare.com\"], iframe[src*=\"turnstile\"], [name=\"cf-turnstile-response\"]')"):
-                        cf_found = True
-                        break
-                    time.sleep(1)
-
-                if cf_found:
-                    self.log("🛡️ 锁定 Cloudflare 验证框，执行点击...")
-                    for attempt in range(3):
-                        try:
-                            sb.uc_gui_click_captcha()
-                            time.sleep(4)
-                            token = sb.execute_script("return document.querySelector('[name=\"cf-turnstile-response\"]') ? document.querySelector('[name=\"cf-turnstile-response\"]').value : ''")
-                            if token:
-                                self.log("✅ Turnstile 验证已成功获取凭证！")
-                                break
-                        except Exception as e:
-                            self.log(f"⚠️ 破解尝试 {attempt+1} 出现小偏差，继续重试...")
-                        time.sleep(2)
-                else:
-                    self.log("✅ 扫描未发现验证框，当前 IP 免检。")
-                # ========================================================
+                # 解 Cloudflare Turnstile：拿不到 token 就直接判失败（fail-closed），
+                # 绝不带着空凭证去提交——那正是"时间没增加"的根因。
+                if not self.solve_turnstile(sb, server_num):
+                    raise Exception("Cloudflare Turnstile 验证失败：始终未能获取有效凭证，已终止提交以避免无效续期。")
 
                 self.human_wait(2, 4)
 
                 try:
                     self.log("🖱️ 正在点击最终提交按钮 'VOTE — ADDS 90 MINUTES'...")
+                    # 提交前再清一次可能盖住按钮的贴片广告（不碰 CF 组件）
+                    self.clear_blocking_ads(sb)
                     # 确保按钮不仅可见，还要处于可点击的激活状态（防广告遮挡或倒计时锁定）
                     sb.wait_for_element_clickable("#vm-submit", timeout=15)
                     sb.click('#vm-submit')
