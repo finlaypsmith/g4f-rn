@@ -16,19 +16,20 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
       with:
-        python-version: '3.10'
+        node-version: '20'
 
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install seleniumbase requests
-        
-    - name: Setup Chrome
+        npm install
+
+    - name: Setup Chrome & Xvfb
       run: |
-        seleniumbase install chromedriver
+        # ubuntu-latest 预装 google-chrome-stable；确保存在并安装 Xvfb
+        google-chrome --version || (sudo apt-get update && sudo apt-get install -y google-chrome-stable)
+        sudo apt-get install -y xvfb
 
     - name: ⚙ 设置代理 (sing-box)
       continue-on-error: true
@@ -44,8 +45,8 @@ jobs:
         TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}  
         SERVERS: ${{ secrets.SERVERS }}  
       run: |
-        # 使用 xvfb 运行以支持强力过人机验证模式
-        xvfb-run -a python gaming4free.py
+        # 使用 xvfb 运行以支持 puppeteer-real-browser 的图形化过盾模式
+        xvfb-run -a node gaming4free.js
 
     - name: 🧽 清理进程和临时文件
       if: always()
