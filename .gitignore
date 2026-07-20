@@ -3,3 +3,4 @@ __pycache__/
 artifacts/
 downloaded_files/
 latest_logs/
+node_modules/

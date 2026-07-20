@@ -1,8 +1,11 @@
 {
   "name": "gaming4free-auto",
-  "version": "1.0.0",
-  "main": "renew.js",
+  "version": "2.0.0",
+  "main": "gaming4free.js",
+  "scripts": {
+    "start": "node gaming4free.js"
+  },
   "dependencies": {
-    "playwright": "^1.40.0"
+    "puppeteer-real-browser": "^1.4.4"
   }
 }
